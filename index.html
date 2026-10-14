@@ -19,6 +19,9 @@
   --glass:rgba(9,10,9,.6);
   --line:rgba(236,232,223,.16);
   --lamp:#f2d79c;
+  --rec:#e5484d;
+  --on-rec:#ffffff;
+  --panel:#0e0f0e;
   --display:"Bodoni Moda","Bodoni 72","Didot",Georgia,serif;
   --mono:"Martian Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;
   color-scheme:dark;
@@ -45,7 +48,21 @@ h1{margin:0;font-family:var(--display);font-style:italic;font-weight:500;font-si
 .btn[aria-pressed="true"]{background:var(--fg);color:var(--bg)}
 .btn svg{width:14px;height:14px;flex:none}
 .vh{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;overflow:hidden}
-.toast{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom,0px) + 82px);transform:translateX(-50%);max-width:min(340px,calc(100% - 32px));padding:10px 14px;border-radius:12px;background:var(--glass);border:1px solid var(--line);font-size:.62rem;line-height:1.6;color:var(--fg);text-align:center;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);pointer-events:none;transition:opacity .5s}
+.shutter{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(env(safe-area-inset-bottom,0px) + 30px + var(--railh,52px));width:64px;height:64px;padding:0;border-radius:50%;border:3px solid var(--fg);background:rgba(0,0,0,.28);display:grid;place-items:center;cursor:pointer;box-shadow:0 2px 20px rgba(0,0,0,.55)}
+.shutter i{display:block;width:46px;height:46px;border-radius:50%;background:var(--rec);transition:width .2s,height .2s,border-radius .2s}
+.shutter.on i{width:24px;height:24px;border-radius:6px}
+.shutter:focus-visible{outline:2px solid var(--lamp);outline-offset:4px}
+.rectime{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(env(safe-area-inset-bottom,0px) + 106px + var(--railh,52px));margin:0;padding:5px 10px;border-radius:999px;background:var(--rec);color:var(--on-rec);font:500 .66rem/1 var(--mono);letter-spacing:.08em;font-variant-numeric:tabular-nums;pointer-events:none}
+.sheet{position:fixed;inset:0;z-index:5;display:flex;align-items:flex-end;justify-content:center;background:rgba(0,0,0,.62);padding-block:calc(env(safe-area-inset-top,0px) + 16px) calc(env(safe-area-inset-bottom,0px) + 16px);padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.sheet-card{width:100%;max-width:420px;display:grid;gap:12px;padding:14px;border-radius:20px;background:var(--panel);border:1px solid var(--line);box-shadow:0 10px 50px rgba(0,0,0,.6)}
+.sheet-head{display:flex;justify-content:space-between;align-items:baseline;gap:10px;min-width:0}
+.sheet-title{margin:0;font-family:var(--display);font-style:italic;font-weight:500;font-size:1.15rem}
+.sheet-info{margin:0;font-size:.6rem;letter-spacing:.06em;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
+.sheet video{display:block;width:100%;max-width:100%;max-height:58vh;border-radius:12px;background:#000;object-fit:contain}
+.sheet-actions{display:flex;flex-wrap:wrap;gap:6px}
+.sheet-actions .btn{border:1px solid var(--line);flex:1 1 auto;justify-content:center}
+.sheet-actions .btn.solid{background:var(--fg);color:var(--bg);border-color:var(--fg)}
+.toast{position:fixed;left:50%;top:calc(env(safe-area-inset-top,0px) + 76px);transform:translateX(-50%);max-width:min(340px,calc(100% - 32px));padding:10px 14px;border-radius:12px;background:var(--glass);border:1px solid var(--line);font-size:.62rem;line-height:1.6;color:var(--fg);text-align:center;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);pointer-events:none;transition:opacity .5s}
 .toast.off{opacity:0}
 @media (prefers-reduced-motion: reduce){.hint,.toast{transition:none}}
 </style>
@@ -90,6 +107,24 @@ h1{margin:0;font-family:var(--display);font-style:italic;font-weight:500;font-si
   <input class="vh" type="file" id="camInput" accept="image/*,video/*" capture="environment">
   <input class="vh" type="file" id="picInput" accept="image/*,video/*">
 </nav>
+
+<button class="shutter" id="recBtn" type="button" aria-label="Start recording"><i aria-hidden="true"></i></button>
+<p class="rectime" id="recTime" hidden>● 0:00</p>
+
+<div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitle" hidden>
+  <div class="sheet-card">
+    <div class="sheet-head">
+      <p class="sheet-title" id="sheetTitle">Your clip</p>
+      <p class="sheet-info" id="clipInfo"></p>
+    </div>
+    <video id="clip" playsinline loop controls></video>
+    <div class="sheet-actions">
+      <button class="btn solid" id="shareBtn" type="button" hidden>Save to Photos</button>
+      <button class="btn" id="dlBtn" type="button">Download</button>
+      <button class="btn" id="discardBtn" type="button">Discard</button>
+    </div>
+  </div>
+</div>
 
 <div class="toast off" id="toast" role="status" aria-live="polite"></div>
 
@@ -313,7 +348,7 @@ void main(){
   function setRes(n) { res = n; ink.width = ink.height = n; shade.width = shade.height = Math.round(n * .5); gl.viewport(0, 0, n, n); }
 
   /* ---------- Sound: a low drone, a sub, ticks and thumps; the creature breathes with it ---------- */
-  let ac = null, master, analyser, lvlBuf, nextT = 0, step = 0, schedId = 0, soundOn = false, clickBuf, level = 0;
+  let ac = null, master, analyser, lvlBuf, nextT = 0, step = 0, schedId = 0, soundOn = false, clickBuf, level = 0, recDest = null;
   const SIX = 60 / 84 / 4;
   function noiseBuf(sec) { const b = ac.createBuffer(1, ac.sampleRate * sec, ac.sampleRate), d = b.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1; return b; }
   function startAudio() {
@@ -323,6 +358,7 @@ void main(){
     const comp = ac.createDynamicsCompressor();
     analyser = ac.createAnalyser(); analyser.fftSize = 512; lvlBuf = new Uint8Array(analyser.fftSize);
     master.connect(comp); comp.connect(analyser); analyser.connect(ac.destination);
+    if (ac.createMediaStreamDestination) { recDest = ac.createMediaStreamDestination(); analyser.connect(recDest); }
     const lp = ac.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = 240; lp.Q.value = 7;
     const dg = ac.createGain(); dg.gain.value = .14; lp.connect(dg); dg.connect(master);
     [[55, "sawtooth", .5], [55.4, "sawtooth", .5], [82.4, "triangle", .3]].forEach(([f, t, gv]) => {
@@ -372,7 +408,7 @@ void main(){
     } else {
       master.gain.cancelScheduledValues(ac.currentTime); master.gain.setTargetAtTime(0, ac.currentTime, .15);
       clearInterval(schedId); soundOn = false;
-      setTimeout(() => { if (!soundOn && ac) ac.suspend().catch(() => {}); }, 700);
+      setTimeout(() => { if (!soundOn && ac && !rec) ac.suspend().catch(() => {}); }, 700);
     }
     btn.setAttribute("aria-pressed", String(soundOn));
     btn.querySelector("span").textContent = soundOn ? "Sound on" : "Sound";
@@ -502,11 +538,150 @@ void main(){
     const x = st.cx * W - size / 2, y = st.cy * H - size / 2;
     ink.style.transform = `translate3d(${x}px,${y - bob}px,0) scale(${swell})`;
     const lean = reduce ? -6 : -6 + Math.sin(st.t * .31) * 3;
-    shade.style.transform = `translate3d(${x + size * .05}px,${y + size * .66}px,0) scale(${1.5 + bob / size * 2},${.4}) skewX(${lean}deg)`;
+    L = { size, x, y, bob, swell, lean, sx: x + size * .05, sy: y + size * .66, sa: 1.5 + bob / size * 2 };
+    shade.style.transform = `translate3d(${L.sx}px,${L.sy}px,0) scale(${L.sa},.4) skewX(${lean}deg)`;
+    if (rec) composite();
     requestAnimationFrame(frame);
   }
+
+  /* ---------- Recording: composite the stage into one canvas and record it ---------- */
+  let L = null, rec = null, recChunks = [], recStart = 0, recTimer = 0, recMime = "", clipBlob = null, clipURL = null, clipName = "", soundTipShown = false;
+  const MAX_SEC = 60;
+  const recBtn = $("recBtn"), recTime = $("recTime"), sheet = $("sheet"), clip = $("clip");
+  const rc = document.createElement("canvas"), rctx = rc.getContext("2d");
+  const canRecord = !!(window.MediaRecorder && rc.captureStream && gl);
+  if (!canRecord) recBtn.hidden = true;
+  const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  let canShareFiles = false;
+  try { canShareFiles = !framed && !!navigator.canShare && navigator.canShare({ files: [new File(["x"], "x.mp4", { type: "video/mp4" })] }); } catch (e) {}
+  $("shareBtn").textContent = isIOS ? "Save to Photos" : "Share";
+
+  const railEl = document.querySelector(".rail");
+  const setRailH = () => document.documentElement.style.setProperty("--railh", railEl.offsetHeight + "px");
+  setRailH(); if (window.ResizeObserver) new ResizeObserver(setRailH).observe(railEl);
+
+  function pickMime() {
+    const list = ["video/mp4;codecs=avc1.42E01E,mp4a.40.2", "video/mp4;codecs=avc1", "video/mp4", "video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm"];
+    for (const m of list) { try { if (MediaRecorder.isTypeSupported(m)) return m; } catch (e) {} }
+    return "";
+  }
+  function drawCover(src, sw, sh) {
+    if (!sw || !sh) return;
+    const s = Math.max(rc.width / sw, rc.height / sh), dw = sw * s, dh = sh * s;
+    rctx.drawImage(src, (rc.width - dw) / 2, (rc.height - dh) / 2, dw, dh);
+  }
+  function composite() {
+    if (!L) return;
+    const c = rctx, k = rc.width / W, h = L.size / 2;
+    c.setTransform(1, 0, 0, 1, 0, 0); c.globalAlpha = 1; c.globalCompositeOperation = "source-over"; if ("filter" in c) c.filter = "none";
+    c.fillStyle = "#050606"; c.fillRect(0, 0, rc.width, rc.height);
+    if (!scene.hidden) c.drawImage(scene, 0, 0, rc.width, rc.height);
+    else if (!bgImg.hidden) drawCover(bgImg, bgImg.naturalWidth, bgImg.naturalHeight);
+    else if (!bgVid.hidden) drawCover(bgVid, bgVid.videoWidth, bgVid.videoHeight);
+    c.save(); c.setTransform(k, 0, 0, k, 0, 0);
+    c.globalAlpha = .82; c.globalCompositeOperation = "multiply"; if ("filter" in c) c.filter = "blur(1.6px)";
+    c.translate(L.sx + h, L.sy + h); c.scale(L.sa, .4); c.transform(1, 0, Math.tan(L.lean * Math.PI / 180), 1, 0, 0);
+    c.drawImage(shade, -h, -h, L.size, L.size);
+    c.restore();
+    c.save(); c.setTransform(k, 0, 0, k, 0, 0);
+    c.translate(L.x + h, L.y - L.bob + h); c.scale(L.swell, L.swell);
+    c.drawImage(ink, -h, -h, L.size, L.size);
+    c.restore();
+  }
+  const fmt = s => Math.floor(s / 60) + ":" + String(Math.floor(s % 60)).padStart(2, "0");
+  function tickTime() {
+    const s = (performance.now() - recStart) / 1000;
+    recTime.textContent = "● " + fmt(s);
+    if (s >= MAX_SEC) stopRec();
+  }
+  async function startRec() {
+    // Keep the audio graph running (silent while Sound is off) so the clip always has a sound track.
+    if (!ac) startAudio();
+    if (ac) { try { await ac.resume(); } catch (e) {} }
+    const k = Math.min(720 / Math.min(W, H), 1280 / Math.max(W, H));
+    rc.width = Math.round(W * k / 2) * 2; rc.height = Math.round(H * k / 2) * 2;
+    composite();
+    const vstream = rc.captureStream(30);
+    const tracks = vstream.getVideoTracks();
+    if (recDest) tracks.push(...recDest.stream.getAudioTracks());
+    const ms = new MediaStream(tracks);
+    recMime = pickMime();
+    try { rec = new MediaRecorder(ms, recMime ? { mimeType: recMime, videoBitsPerSecond: 6e6 } : { videoBitsPerSecond: 6e6 }); }
+    catch (e) { try { rec = new MediaRecorder(ms); } catch (e2) { rec = null; toast("This browser can't record video."); return; } }
+    recChunks = [];
+    rec.ondataavailable = e => { if (e.data && e.data.size) recChunks.push(e.data); };
+    rec.onstop = () => { vstream.getVideoTracks().forEach(t => t.stop()); finishRec(); };
+    rec.start(1000);
+    recStart = performance.now();
+    recBtn.classList.add("on"); recBtn.setAttribute("aria-label", "Stop recording");
+    recTime.hidden = false; tickTime(); recTimer = setInterval(tickTime, 250);
+    if (!soundOn && !soundTipShown) { soundTipShown = true; toast("Recording. Turn Sound on to include it in the clip.", 2600); }
+    wake(); dismissHint();
+  }
+  function stopRec() {
+    clearInterval(recTimer);
+    recBtn.classList.remove("on"); recBtn.setAttribute("aria-label", "Start recording"); recTime.hidden = true;
+    if (rec && rec.state !== "inactive") rec.stop();
+  }
+  function finishRec() {
+    const type = (rec && rec.mimeType) || recMime || "video/webm";
+    const secs = (performance.now() - recStart) / 1000;
+    rec = null;
+    if (!soundOn && ac) ac.suspend().catch(() => {});
+    if (!recChunks.length) { toast("Nothing was recorded. Try again."); return; }
+    clipBlob = new Blob(recChunks, { type: type.split(";")[0] }); recChunks = [];
+    const ext = type.includes("mp4") ? "mp4" : "webm";
+    const d = new Date(), p = n => String(n).padStart(2, "0");
+    clipName = `ink-familiar-${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}.${ext}`;
+    if (clipURL) URL.revokeObjectURL(clipURL);
+    clipURL = URL.createObjectURL(clipBlob);
+    clip.src = clipURL;
+    $("clipInfo").textContent = `${fmt(secs)} · ${(clipBlob.size / 1048576).toFixed(1)} MB · ${ext.toUpperCase()}`;
+    $("shareBtn").hidden = !canShareFiles;
+    sheet.hidden = false; recBtn.hidden = true;
+    clip.play().catch(() => {});
+    $("dlBtn").focus({ preventScroll: true });
+  }
+  function closeSheet() {
+    sheet.hidden = true; recBtn.hidden = !canRecord;
+    clip.pause(); clip.removeAttribute("src"); clip.load();
+  }
+  let dlP = null;
+  const getDownloads = () => dlP || (dlP = (window.claude && window.claude.use) ? window.claude.use("downloads").catch(() => null) : Promise.resolve(null));
+  if (framed) setTimeout(getDownloads, 0);
+  async function downloadClip() {
+    if (!clipBlob) return;
+    if (framed) {
+      const dl = await getDownloads();
+      if (!dl) { toast("Saving files isn't available here. Use the GitHub Pages version to download clips."); return; }
+      try { await dl.save({ filename: clipName, data: clipBlob }); toast("Saved " + clipName, 2400); }
+      catch (e) {
+        const code = e && e.code;
+        if (code === "declined") return;
+        toast(code === "rate_limited" ? "A save is already waiting for you to confirm." : "This view can't save the video. Use the GitHub Pages version instead.");
+      }
+      return;
+    }
+    const a = document.createElement("a");
+    a.href = clipURL; a.download = clipName; a.rel = "noopener";
+    document.body.appendChild(a); a.click(); setTimeout(() => a.remove(), 1500);
+    toast("Downloading " + clipName, 2400);
+  }
+  async function shareClip() {
+    if (!clipBlob) return;
+    const file = new File([clipBlob], clipName, { type: clipBlob.type });
+    try { await navigator.share({ files: [file], title: "Ink Familiar" }); }
+    catch (e) { if (!e || e.name !== "AbortError") downloadClip(); }
+  }
+  recBtn.addEventListener("click", () => { if (rec) stopRec(); else startRec(); });
+  $("dlBtn").addEventListener("click", downloadClip);
+  $("shareBtn").addEventListener("click", shareClip);
+  $("discardBtn").addEventListener("click", closeSheet);
+  sheet.addEventListener("click", e => { if (e.target === sheet) closeSheet(); });
+  addEventListener("keydown", e => { if (e.key === "Escape" && !sheet.hidden) closeSheet(); });
+
   document.addEventListener("visibilitychange", () => {
-    if (document.hidden) { running = false; }
+    if (document.hidden) { running = false; if (rec) stopRec(); }
     else if (!running) { running = true; last = performance.now(); requestAnimationFrame(frame); }
   });
 
