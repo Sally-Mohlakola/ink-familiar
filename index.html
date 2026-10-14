@@ -1,0 +1,523 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0;font:14px system-ui,sans-serif}img{max-width:100%}[hidden]{display:none!important}</style>
+<title>Ink Familiar</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="description" content="A mirror-symmetric ink creature that morphs over a night scene or your own photo.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:ital,opsz,wght@1,6..96,500&family=Martian+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one full-bleed stage (scene, creature, cast shadow); a whisper of type at the top; a single control rail pinned to the bottom edge. */
+:root{
+  --bg:#050606;
+  --fg:#ece8df;
+  --muted:#a7a397;
+  --glass:rgba(9,10,9,.6);
+  --line:rgba(236,232,223,.16);
+  --lamp:#f2d79c;
+  --display:"Bodoni Moda","Bodoni 72","Didot",Georgia,serif;
+  --mono:"Martian Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  color-scheme:dark;
+}
+html,body{height:100%}
+body{background:var(--bg);color:var(--fg);overflow:hidden;overscroll-behavior:none;font-family:var(--mono);-webkit-tap-highlight-color:transparent}
+#stage{position:fixed;inset:0;overflow:hidden;background:var(--bg);touch-action:none;user-select:none;-webkit-user-select:none;cursor:grab}
+#stage.dragging{cursor:grabbing}
+#scene,#bgImg,#bgVid{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block}
+#shade{position:absolute;left:0;top:0;transform-origin:50% 50%;opacity:.82;filter:blur(1.6px);mix-blend-mode:multiply;pointer-events:none;will-change:transform}
+#ink{position:absolute;left:0;top:0;pointer-events:none;will-change:transform}
+.ui{position:fixed;left:0;right:0;pointer-events:none;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.top{top:0;padding-block:calc(env(safe-area-inset-top,0px) + 14px) 0;display:flex;justify-content:space-between;align-items:baseline;gap:12px}
+h1{margin:0;font-family:var(--display);font-style:italic;font-weight:500;font-size:1.4rem;line-height:1.1;letter-spacing:.005em;text-shadow:0 1px 14px rgba(0,0,0,.7);text-wrap:balance}
+.hint{margin:0;font-size:.58rem;line-height:1.7;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);text-align:right;text-shadow:0 1px 8px rgba(0,0,0,.8);transition:opacity .8s}
+.hint.gone{opacity:0}
+.topr{display:flex;flex-direction:column;align-items:flex-end;gap:8px;min-width:0}
+.chip{pointer-events:auto;background:var(--glass);border:1px solid var(--line);min-height:34px;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}
+.bottom{bottom:0;padding-block:0 calc(env(safe-area-inset-bottom,0px) + 16px);display:flex;justify-content:center}
+.rail{pointer-events:auto;display:flex;flex-wrap:wrap;justify-content:center;gap:2px;padding:5px;border-radius:24px;background:var(--glass);border:1px solid var(--line);backdrop-filter:blur(14px) saturate(1.2);-webkit-backdrop-filter:blur(14px) saturate(1.2);max-width:100%}
+.btn{appearance:none;border:0;background:transparent;color:var(--fg);font:500 .62rem/1 var(--mono);letter-spacing:.05em;text-transform:uppercase;padding:0 11px;min-height:40px;border-radius:19px;cursor:pointer;display:inline-flex;align-items:center;gap:7px;white-space:nowrap}
+.btn:hover{background:rgba(236,232,223,.08)}
+.btn:focus-visible{outline:1.5px solid var(--lamp);outline-offset:1px}
+.btn[aria-pressed="true"]{background:var(--fg);color:var(--bg)}
+.btn svg{width:14px;height:14px;flex:none}
+.vh{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;overflow:hidden}
+.toast{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom,0px) + 82px);transform:translateX(-50%);max-width:min(340px,calc(100% - 32px));padding:10px 14px;border-radius:12px;background:var(--glass);border:1px solid var(--line);font-size:.62rem;line-height:1.6;color:var(--fg);text-align:center;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);pointer-events:none;transition:opacity .5s}
+.toast.off{opacity:0}
+@media (prefers-reduced-motion: reduce){.hint,.toast{transition:none}}
+</style>
+</head>
+<body>
+<div id="stage" aria-label="Ink creature stage. Drag to move, tap to mutate, pinch to resize.">
+  <canvas id="scene" aria-hidden="true"></canvas>
+  <img id="bgImg" alt="Your backdrop" hidden>
+  <video id="bgVid" muted loop playsinline autoplay hidden></video>
+  <canvas id="shade" aria-hidden="true"></canvas>
+  <canvas id="ink" aria-hidden="true"></canvas>
+</div>
+
+<header class="ui top">
+  <h1>Ink Familiar</h1>
+  <div class="topr">
+    <p class="hint" id="hint">Drag to move<br>Tap to mutate<br>Pinch to resize</p>
+    <button class="btn chip" id="nightBtn" type="button" hidden>
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><path d="M11.5 10.5A5 5 0 0 1 6 3a5 5 0 1 0 6.9 6.9z"/></svg>Night scene
+    </button>
+  </div>
+</header>
+
+<nav class="ui bottom" aria-label="Controls">
+  <div class="rail">
+    <label class="btn" for="camInput" tabindex="0" id="camBtn">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><path d="M2 5.5h2.6L6 3.8h4l1.4 1.7H14v7H2z"/><circle cx="8" cy="8.8" r="2.3"/></svg>Camera
+    </label>
+    <label class="btn" for="picInput" tabindex="0" id="picBtn">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><rect x="2" y="3" width="12" height="10" rx="1"/><path d="M2.5 11.5l3.5-3.5 3 3 2-2 2.5 2.5"/></svg>Photos
+    </label>
+    <button class="btn" id="liveBtn" type="button" hidden>
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><circle cx="8" cy="8" r="2"/><circle cx="8" cy="8" r="5.5"/></svg>Live
+    </button>
+    <button class="btn" id="mutBtn" type="button">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><path d="M8 2v12M3 5c2 0 3 1.5 5 3M13 5c-2 0-3 1.5-5 3M3.5 12c1.5-1 3-1.6 4.5-1.6S11 11 12.5 12"/></svg>Mutate
+    </button>
+    <button class="btn" id="sndBtn" type="button" aria-pressed="false">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><path d="M2.5 6h2.5L8.5 3v10L5 10H2.5z"/><path d="M11 5.5c1 .8 1.5 1.6 1.5 2.5s-.5 1.7-1.5 2.5"/></svg><span>Sound</span>
+    </button>
+  </div>
+  <input class="vh" type="file" id="camInput" accept="image/*,video/*" capture="environment">
+  <input class="vh" type="file" id="picInput" accept="image/*,video/*">
+</nav>
+
+<div class="toast off" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+(() => {
+  "use strict";
+  const $ = id => document.getElementById(id);
+  const stage = $("stage"), scene = $("scene"), ink = $("ink"), shade = $("shade");
+  const bgImg = $("bgImg"), bgVid = $("bgVid"), hint = $("hint"), toastEl = $("toast");
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  let W = innerWidth, H = innerHeight;
+  const st = { cx: .5, cy: .47, scale: 1, seed: Math.random() * 20, seedTarget: 0, t: 0, pulse: .3, boost: 0 };
+  st.seedTarget = st.seed;
+
+  let toastTimer;
+  function toast(msg, ms = 3200) {
+    toastEl.textContent = msg; toastEl.classList.remove("off");
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => toastEl.classList.add("off"), ms);
+  }
+
+  /* ---------- Night scene, painted once per resize ---------- */
+  function rng(seed) { let s = seed >>> 0 || 1; return () => (s = (s * 16807) % 2147483647) / 2147483647; }
+  function drawScene() {
+    const dpr = Math.min(devicePixelRatio || 1, 2);
+    const w = Math.round(W * dpr), h = Math.round(H * dpr);
+    scene.width = w; scene.height = h;
+    const c = scene.getContext("2d"), r = rng(9173), s = Math.min(w, h * .6) / 400;
+    const hz = h * .43, vpx = w * .5;
+    const lamp = { x: w * .16, y: h * .07 };
+
+    c.fillStyle = "#030404"; c.fillRect(0, 0, w, h);
+    let g = c.createLinearGradient(0, 0, 0, hz);
+    g.addColorStop(0, "#020303"); g.addColorStop(1, "#0a0d0b");
+    c.fillStyle = g; c.fillRect(0, 0, w, hz + 2);
+
+    // tree trunks at the horizon
+    for (let i = 0; i < 14; i++) {
+      const x = r() * w, tw = (3 + r() * 7) * s;
+      c.fillStyle = "#040504"; c.fillRect(x, hz - h * (.06 + r() * .1), tw, h * .14);
+    }
+    // canopy
+    for (let i = 0; i < 520; i++) {
+      const x = r() * w * 1.1 - w * .05, y = Math.pow(r(), 1.3) * hz * 1.02 - h * .03;
+      const rad = (14 + r() * 46) * s;
+      const d = Math.hypot(x - lamp.x, y - lamp.y) / (w * .55);
+      const lit = Math.max(0, 1 - d);
+      const gch = 9 + r() * 10 + lit * 30, rch = 4 + lit * 16, bch = 6 + lit * 6;
+      c.fillStyle = `rgba(${rch|0},${gch|0},${bch|0},${.3 + r() * .3})`;
+      c.beginPath(); c.arc(x, y, rad, 0, 7); c.fill();
+    }
+    // a bright clump of leaves lit by a distant lamp
+    const far = { x: w * .38, y: h * .3 };
+    for (let i = 0; i < 70; i++) {
+      const a = r() * 7, d = Math.pow(r(), .6) * 26 * s;
+      c.fillStyle = `rgba(${70 + r() * 40|0},${120 + r() * 50|0},${40 + r() * 20|0},${.25 + r() * .45})`;
+      c.beginPath(); c.arc(far.x + Math.cos(a) * d, far.y + Math.sin(a) * d * .8, (2 + r() * 6) * s, 0, 7); c.fill();
+    }
+    // distant lamps
+    [[w * .42, h * .27, 1], [w * .58, h * .39, .7], [w * .66, h * .41, .5], [w * .3, h * .42, .45]].forEach(([x, y, k]) => {
+      const gg = c.createRadialGradient(x, y, 0, x, y, 28 * s * k);
+      gg.addColorStop(0, "rgba(255,236,200,.9)"); gg.addColorStop(.15, "rgba(255,220,160,.35)"); gg.addColorStop(1, "rgba(255,210,150,0)");
+      c.fillStyle = gg; c.beginPath(); c.arc(x, y, 28 * s * k, 0, 7); c.fill();
+    });
+
+    // ground geometry
+    const L0 = [vpx - w * .015, hz], R0 = [vpx + w * .035, hz], L1 = [w * .12, h], R1 = [w * 1.14, h];
+    // gravel strip on the left
+    g = c.createLinearGradient(0, hz, 0, h);
+    g.addColorStop(0, "#0d0d0c"); g.addColorStop(1, "#3b3a37");
+    c.fillStyle = g; c.beginPath(); c.moveTo(0, hz); c.lineTo(L0[0], hz); c.lineTo(L1[0], h); c.lineTo(0, h); c.fill();
+    for (let i = 0; i < 2600; i++) {
+      const y = hz + Math.pow(r(), .7) * (h - hz), f = (y - hz) / (h - hz);
+      const xr = L0[0] + (L1[0] - L0[0]) * f, x = r() * xr;
+      c.fillStyle = `rgba(${r() < .5 ? "210,205,195" : "0,0,0"},${.05 + f * .18})`;
+      c.fillRect(x, y, (.6 + f * 1.8) * s, (.6 + f * 1.4) * s);
+    }
+    // grass on the right
+    g = c.createLinearGradient(0, hz, 0, h);
+    g.addColorStop(0, "#050c06"); g.addColorStop(1, "#14301a");
+    c.fillStyle = g; c.beginPath(); c.moveTo(R0[0], hz); c.lineTo(w, hz); c.lineTo(w, h); c.lineTo(R1[0], h); c.fill();
+    for (let i = 0; i < 900; i++) {
+      const y = hz + Math.pow(r(), .8) * (h - hz), f = (y - hz) / (h - hz);
+      const xl = R0[0] + (R1[0] - R0[0]) * f; const x = xl + r() * (w - xl);
+      c.strokeStyle = `rgba(${40 + r() * 40|0},${80 + r() * 60|0},${30 + r() * 20|0},${.08 + f * .25})`;
+      c.lineWidth = (.5 + f) * s; c.beginPath(); c.moveTo(x, y); c.lineTo(x + (r() - .5) * 3 * s, y - (2 + f * 8) * s); c.stroke();
+    }
+    // paving
+    c.save();
+    c.beginPath(); c.moveTo(...L0); c.lineTo(...R0); c.lineTo(...R1); c.lineTo(...L1); c.closePath(); c.clip();
+    g = c.createLinearGradient(0, hz, 0, h);
+    g.addColorStop(0, "#1c1712"); g.addColorStop(.5, "#5a4a37"); g.addColorStop(1, "#8a7255");
+    c.fillStyle = g; c.fillRect(0, hz, w, h - hz);
+    // lamp pool
+    g = c.createRadialGradient(w * .32, h * .78, 0, w * .32, h * .78, w * .95);
+    g.addColorStop(0, "rgba(255,200,130,.3)"); g.addColorStop(1, "rgba(255,196,120,0)");
+    c.fillStyle = g; c.fillRect(0, hz, w, h - hz);
+    // bricks in perspective
+    const rows = 34, cols = 6;
+    const edgeX = (P, Q, y) => P[0] + (Q[0] - P[0]) * ((y - P[1]) / (Q[1] - P[1]));
+    let prevY = hz;
+    for (let i = 1; i <= rows; i++) {
+      const f = Math.pow(i / rows, 2.1), y = hz + (h - hz) * f;
+      c.strokeStyle = `rgba(0,0,0,${.25 + f * .3})`; c.lineWidth = (.4 + f * 2.2) * s;
+      c.beginPath(); c.moveTo(0, y); c.lineTo(w, y); c.stroke();
+      const ym = (y + prevY) / 2, xl = edgeX(L0, L1, ym), xr = edgeX(R0, R1, ym);
+      for (let j = 0; j <= cols; j++) {
+        const u = (j + (i % 2) * .5) / cols; if (u > 1) continue;
+        const xa = edgeX(L0, L1, prevY) + (edgeX(R0, R1, prevY) - edgeX(L0, L1, prevY)) * u;
+        const xb = edgeX(L0, L1, y) + (edgeX(R0, R1, y) - edgeX(L0, L1, y)) * u;
+        c.beginPath(); c.moveTo(xa, prevY); c.lineTo(xb, y); c.stroke();
+      }
+      // a few tiles slightly lighter
+      if (f > .15) for (let j = 0; j < cols; j++) if (r() < .25) {
+        const u0 = (j + (i % 2) * .5) / cols, u1 = u0 + 1 / cols;
+        const xa0 = xl + (xr - xl) * Math.min(u0, 1), xa1 = xl + (xr - xl) * Math.min(u1, 1);
+        c.fillStyle = `rgba(255,220,170,${.02 + r() * .04})`; c.fillRect(xa0, prevY, xa1 - xa0, y - prevY);
+      }
+      prevY = y;
+    }
+    // kerb line
+    c.restore();
+    c.strokeStyle = "rgba(120,110,95,.5)"; c.lineWidth = 2 * s;
+    c.beginPath(); c.moveTo(...L0); c.lineTo(...L1); c.stroke();
+
+    // lamp post and its light
+    c.fillStyle = "#070706";
+    c.fillRect(lamp.x - 2.5 * s, lamp.y, 5 * s, h * .52);
+    c.fillRect(lamp.x - 8 * s, lamp.y + h * .45, 16 * s, h * .07);
+    g = c.createRadialGradient(lamp.x, lamp.y, 0, lamp.x, lamp.y, w * .55);
+    g.addColorStop(0, "rgba(255,228,170,.42)"); g.addColorStop(.12, "rgba(255,214,150,.16)"); g.addColorStop(1, "rgba(255,214,150,0)");
+    c.fillStyle = g; c.fillRect(0, 0, w, h);
+    c.fillStyle = "#fff5dc"; c.beginPath(); c.ellipse(lamp.x, lamp.y, 13 * s, 10 * s, 0, 0, 7); c.fill();
+
+    // vignette and grain
+    g = c.createRadialGradient(w * .5, h * .5, Math.min(w, h) * .25, w * .5, h * .5, Math.hypot(w, h) * .62);
+    g.addColorStop(0, "rgba(0,0,0,0)"); g.addColorStop(1, "rgba(0,0,0,.6)");
+    c.fillStyle = g; c.fillRect(0, 0, w, h);
+    for (let i = 0; i < 9000; i++) { c.fillStyle = `rgba(255,255,255,${r() * .035})`; c.fillRect(r() * w, r() * h, 1, 1); }
+  }
+
+  /* ---------- The ink creature (WebGL) ---------- */
+  const gl = ink.getContext("webgl", { premultipliedAlpha: true, alpha: true, antialias: false, preserveDrawingBuffer: true });
+  const sctx = shade.getContext("2d");
+  let prog, U = {};
+  const VS = "attribute vec2 a;varying vec2 v;void main(){v=a*.5+.5;gl_Position=vec4(a,0.,1.);}";
+  const FS = `
+#ifdef GL_FRAGMENT_PRECISION_HIGH
+precision highp float;
+#else
+precision mediump float;
+#endif
+varying vec2 v;
+uniform float uT, uSeed, uPulse;
+vec3 mod289(vec3 x){return x-floor(x*(1./289.))*289.;}
+vec4 mod289(vec4 x){return x-floor(x*(1./289.))*289.;}
+vec4 permute(vec4 x){return mod289(((x*34.)+1.)*x);}
+vec4 tis(vec4 r){return 1.79284291400159-.85373472095314*r;}
+float snoise(vec3 v){
+  const vec2 C=vec2(1./6.,1./3.);const vec4 D=vec4(0.,.5,1.,2.);
+  vec3 i=floor(v+dot(v,C.yyy));vec3 x0=v-i+dot(i,C.xxx);
+  vec3 g=step(x0.yzx,x0.xyz);vec3 l=1.-g;vec3 i1=min(g.xyz,l.zxy);vec3 i2=max(g.xyz,l.zxy);
+  vec3 x1=x0-i1+C.xxx;vec3 x2=x0-i2+C.yyy;vec3 x3=x0-D.yyy;
+  i=mod289(i);
+  vec4 p=permute(permute(permute(i.z+vec4(0.,i1.z,i2.z,1.))+i.y+vec4(0.,i1.y,i2.y,1.))+i.x+vec4(0.,i1.x,i2.x,1.));
+  float n_=.142857142857;vec3 ns=n_*D.wyz-D.xzx;
+  vec4 j=p-49.*floor(p*ns.z*ns.z);vec4 x_=floor(j*ns.z);vec4 y_=floor(j-7.*x_);
+  vec4 x=x_*ns.x+ns.yyyy;vec4 y=y_*ns.x+ns.yyyy;vec4 h=1.-abs(x)-abs(y);
+  vec4 b0=vec4(x.xy,y.xy);vec4 b1=vec4(x.zw,y.zw);
+  vec4 s0=floor(b0)*2.+1.;vec4 s1=floor(b1)*2.+1.;vec4 sh=-step(h,vec4(0.));
+  vec4 a0=b0.xzyw+s0.xzyw*sh.xxyy;vec4 a1=b1.xzyw+s1.xzyw*sh.zzww;
+  vec3 p0=vec3(a0.xy,h.x);vec3 p1=vec3(a0.zw,h.y);vec3 p2=vec3(a1.xy,h.z);vec3 p3=vec3(a1.zw,h.w);
+  vec4 nm=tis(vec4(dot(p0,p0),dot(p1,p1),dot(p2,p2),dot(p3,p3)));p0*=nm.x;p1*=nm.y;p2*=nm.z;p3*=nm.w;
+  vec4 m=max(.6-vec4(dot(x0,x0),dot(x1,x1),dot(x2,x2),dot(x3,x3)),0.);m=m*m;
+  return 42.*dot(m*m,vec4(dot(p0,x0),dot(p1,x1),dot(p2,x2),dot(p3,x3)));
+}
+float fbm(vec3 p){float a=.5,s=0.;for(int i=0;i<4;i++){s+=a*snoise(p);p=p*2.07+vec3(1.3,7.1,3.7);a*=.5;}return s;}
+float fbm2(vec3 p){return .6*snoise(p)+.3*snoise(p*2.1+vec3(4.1,2.3,0.));}
+void main(){
+  vec2 p=v*2.-1.;
+  vec2 m=vec2(abs(p.x),p.y);                 // the fold: left half mirrors the right
+  float z=uT*.21+uSeed;
+  vec3 b=vec3(m*1.25,z);
+  vec2 w=vec2(fbm2(b+vec3(0.,0.,11.)),fbm2(b+vec3(5.2,1.3,23.)));
+  vec2 q=m+w*.42;
+  float r=length(q*vec2(1.08,.86));
+  float body=fbm(vec3(q*3.1,z*1.15+3.))*1.45+.3+uPulse*.14-r*1.3;
+  body+=smoothstep(.12,0.,m.x+w.x*.06)*.16*smoothstep(.9,.2,abs(p.y));    // spine
+  float holes=fbm2(vec3(q*6.5,z*1.4+60.));
+  body-=smoothstep(.15,.45,holes)*.35;
+  float n1=snoise(vec3(q*2.2,z*.8+40.));
+  float n2=snoise(vec3(q*4.8+3.,z+80.));
+  vec2 pol=vec2(atan(q.y,q.x+.02)*1.7,r*1.15);                            // radiating legs
+  float n3=snoise(vec3(pol,z*.7+120.));
+  float rid1=pow(1.-abs(n1),20.)*smoothstep(1.15,.3,r);
+  float rid2=pow(1.-abs(n2),30.)*smoothstep(.9,.2,r);
+  float leg=pow(1.-abs(n3),16.)*smoothstep(1.1,.4,r)*smoothstep(.12,.32,r);
+  float lines=max(max(rid1,rid2*.9),leg);
+  float a=smoothstep(0.,.025,body);
+  a=max(a,smoothstep(.3,.68,lines));
+  a*=smoothstep(1.,.84,max(abs(p.x),abs(p.y)));
+  float sheen=smoothstep(.06,.32,body)*(.5+.5*snoise(vec3(q*6.,z*1.8)));
+  vec3 col=vec3(.006,.006,.008)+sheen*vec3(.014,.015,.017);
+  gl_FragColor=vec4(col*a,a*.97);
+}`;
+  let res = 560;
+  function initGL() {
+    if (!gl) return false;
+    const sh = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s)); return s; };
+    prog = gl.createProgram();
+    gl.attachShader(prog, sh(gl.VERTEX_SHADER, VS)); gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, FS));
+    gl.linkProgram(prog); if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
+    gl.useProgram(prog);
+    const buf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+    const loc = gl.getAttribLocation(prog, "a"); gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+    ["uT", "uSeed", "uPulse"].forEach(n => U[n] = gl.getUniformLocation(prog, n));
+    setRes(res);
+    return true;
+  }
+  function setRes(n) { res = n; ink.width = ink.height = n; shade.width = shade.height = Math.round(n * .5); gl.viewport(0, 0, n, n); }
+
+  /* ---------- Sound: a low drone, a sub, ticks and thumps; the creature breathes with it ---------- */
+  let ac = null, master, analyser, lvlBuf, nextT = 0, step = 0, schedId = 0, soundOn = false, clickBuf, level = 0;
+  const SIX = 60 / 84 / 4;
+  function noiseBuf(sec) { const b = ac.createBuffer(1, ac.sampleRate * sec, ac.sampleRate), d = b.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1; return b; }
+  function startAudio() {
+    const AC = window.AudioContext || window.webkitAudioContext; if (!AC) { toast("This browser can't play generated sound."); return false; }
+    ac = new AC();
+    master = ac.createGain(); master.gain.value = 0;
+    const comp = ac.createDynamicsCompressor();
+    analyser = ac.createAnalyser(); analyser.fftSize = 512; lvlBuf = new Uint8Array(analyser.fftSize);
+    master.connect(comp); comp.connect(analyser); analyser.connect(ac.destination);
+    const lp = ac.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = 240; lp.Q.value = 7;
+    const dg = ac.createGain(); dg.gain.value = .14; lp.connect(dg); dg.connect(master);
+    [[55, "sawtooth", .5], [55.4, "sawtooth", .5], [82.4, "triangle", .3]].forEach(([f, t, gv]) => {
+      const o = ac.createOscillator(); o.type = t; o.frequency.value = f; const g = ac.createGain(); g.gain.value = gv; o.connect(g); g.connect(lp); o.start();
+    });
+    const lfo = ac.createOscillator(); lfo.frequency.value = .055; const lg = ac.createGain(); lg.gain.value = 170; lfo.connect(lg); lg.connect(lp.frequency); lfo.start();
+    const sub = ac.createOscillator(); sub.frequency.value = 41.2; const sg = ac.createGain(); sg.gain.value = .2; sub.connect(sg); sg.connect(master); sub.start();
+    const ns = ac.createBufferSource(); ns.buffer = noiseBuf(2); ns.loop = true;
+    const bp = ac.createBiquadFilter(); bp.type = "bandpass"; bp.frequency.value = 1300; bp.Q.value = .8;
+    const ng = ac.createGain(); ng.gain.value = .022; ns.connect(bp); bp.connect(ng); ng.connect(master); ns.start();
+    clickBuf = noiseBuf(.12);
+    nextT = ac.currentTime + .1;
+    return true;
+  }
+  function out(node, pan) {
+    if (ac.createStereoPanner) { const p = ac.createStereoPanner(); p.pan.value = pan; node.connect(p); p.connect(master); } else node.connect(master);
+  }
+  function thump(t, big) {
+    const o = ac.createOscillator(); o.frequency.setValueAtTime(big ? 150 : 110, t); o.frequency.exponentialRampToValueAtTime(36, t + .28);
+    const g = ac.createGain(); g.gain.setValueAtTime(.0001, t); g.gain.exponentialRampToValueAtTime(big ? .95 : .55, t + .006); g.gain.exponentialRampToValueAtTime(.0001, t + .55);
+    o.connect(g); g.connect(master); o.start(t); o.stop(t + .6);
+  }
+  function tick(t, k) {
+    const s = ac.createBufferSource(); s.buffer = clickBuf;
+    const hp = ac.createBiquadFilter(); hp.type = "highpass"; hp.frequency.value = 2200 + k * 6000;
+    const g = ac.createGain(); g.gain.setValueAtTime(.16 * (.35 + k), t); g.gain.exponentialRampToValueAtTime(.0001, t + .015 + k * .045);
+    s.connect(hp); hp.connect(g); out(g, Math.random() * 1.6 - .8); s.start(t); s.stop(t + .12);
+  }
+  function scheduler() {
+    while (nextT < ac.currentTime + .15) {
+      if (step === 0 || step === 16) thump(nextT, true);
+      else if (step === 10 || step === 26) thump(nextT, false);
+      if (Math.random() < .26) tick(nextT, Math.random());
+      if (step % 8 === 6 && Math.random() < .5) { tick(nextT, .9); tick(nextT + SIX / 2, .6); }
+      nextT += SIX; step = (step + 1) % 32;
+    }
+  }
+  function glitch() { if (!soundOn) return; const t = ac.currentTime; for (let i = 0; i < 9; i++) tick(t + i * .028 + Math.random() * .01, .3 + Math.random() * .7); thump(t + .02, true); }
+  async function toggleSound() {
+    const btn = $("sndBtn");
+    if (!soundOn) {
+      if (!ac && !startAudio()) return;
+      try { await ac.resume(); } catch (e) {}
+      nextT = Math.max(nextT, ac.currentTime + .05);
+      master.gain.cancelScheduledValues(ac.currentTime); master.gain.setTargetAtTime(.75, ac.currentTime, .6);
+      schedId = setInterval(scheduler, 50); soundOn = true;
+    } else {
+      master.gain.cancelScheduledValues(ac.currentTime); master.gain.setTargetAtTime(0, ac.currentTime, .15);
+      clearInterval(schedId); soundOn = false;
+      setTimeout(() => { if (!soundOn && ac) ac.suspend().catch(() => {}); }, 700);
+    }
+    btn.setAttribute("aria-pressed", String(soundOn));
+    btn.querySelector("span").textContent = soundOn ? "Sound on" : "Sound";
+  }
+  function readLevel() {
+    if (!soundOn || !analyser) return 0;
+    analyser.getByteTimeDomainData(lvlBuf);
+    let sum = 0; for (let i = 0; i < lvlBuf.length; i++) { const x = (lvlBuf[i] - 128) / 128; sum += x * x; }
+    return Math.min(1, Math.sqrt(sum / lvlBuf.length) * 3.2);
+  }
+
+  /* ---------- Interaction ---------- */
+  let hintShown = true;
+  function dismissHint() { if (hintShown) { hintShown = false; hint.classList.add("gone"); } }
+  function mutate() {
+    st.seedTarget += 1.4 + Math.random() * 1.8; st.boost = 2.6; glitch();
+    if (navigator.vibrate) try { navigator.vibrate(12); } catch (e) {}
+  }
+  const ptrs = new Map(); let gest = null;
+  const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
+  const pts = () => [...ptrs.values()];
+  stage.addEventListener("pointerdown", e => {
+    try { stage.setPointerCapture(e.pointerId); } catch (err) {}
+    ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (ptrs.size === 1) gest = { type: "tap", sx: e.clientX, sy: e.clientY, cx: st.cx, cy: st.cy, t0: performance.now() };
+    else if (ptrs.size === 2) { const [a, b] = pts(); gest = { type: "pinch", d0: Math.hypot(a.x - b.x, a.y - b.y) || 1, s0: st.scale }; }
+    wake();
+  });
+  stage.addEventListener("pointermove", e => {
+    if (!ptrs.has(e.pointerId) || !gest) return;
+    ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (gest.type === "tap" && Math.hypot(e.clientX - gest.sx, e.clientY - gest.sy) > 8) { gest.type = "drag"; stage.classList.add("dragging"); dismissHint(); }
+    if (gest.type === "drag") {
+      st.cx = clamp(gest.cx + (e.clientX - gest.sx) / W, .04, .96);
+      st.cy = clamp(gest.cy + (e.clientY - gest.sy) / H, .12, .82);
+    } else if (gest.type === "pinch" && ptrs.size >= 2) {
+      const [a, b] = pts(); st.scale = clamp(gest.s0 * Math.hypot(a.x - b.x, a.y - b.y) / gest.d0, .4, 2.3); dismissHint();
+    }
+  });
+  function endPtr(e) {
+    if (!ptrs.has(e.pointerId)) return;
+    ptrs.delete(e.pointerId);
+    if (gest && gest.type === "tap" && e.type === "pointerup" && performance.now() - gest.t0 < 400) { mutate(); dismissHint(); }
+    if (ptrs.size === 0) { gest = null; stage.classList.remove("dragging"); }
+    else if (gest && gest.type === "pinch") gest = null;
+  }
+  stage.addEventListener("pointerup", endPtr);
+  stage.addEventListener("pointercancel", endPtr);
+  stage.addEventListener("wheel", e => { e.preventDefault(); st.scale = clamp(st.scale * Math.exp(-e.deltaY * .0015), .4, 2.3); }, { passive: false });
+
+  $("mutBtn").addEventListener("click", () => { mutate(); dismissHint(); });
+  $("sndBtn").addEventListener("click", toggleSound);
+  ["camBtn", "picBtn"].forEach(id => $(id).addEventListener("keydown", e => {
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); $(id === "camBtn" ? "camInput" : "picInput").click(); }
+  }));
+
+  /* ---------- Backdrops ---------- */
+  let objURL = null, stream = null;
+  function clearBackdrop() {
+    if (objURL) { URL.revokeObjectURL(objURL); objURL = null; }
+    if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+    bgVid.pause(); bgVid.srcObject = null; bgVid.removeAttribute("src"); bgVid.load();
+    bgImg.removeAttribute("src");
+    bgImg.hidden = true; bgVid.hidden = true;
+  }
+  function showNight() { clearBackdrop(); scene.hidden = false; $("nightBtn").hidden = true; }
+  function useFile(file) {
+    if (!file) return;
+    const isVid = file.type.startsWith("video"), isImg = file.type.startsWith("image");
+    if (!isVid && !isImg) { toast("Choose a photo or a video clip."); return; }
+    clearBackdrop(); objURL = URL.createObjectURL(file);
+    if (isVid) { bgVid.src = objURL; bgVid.hidden = false; bgVid.play().catch(() => {}); }
+    else { bgImg.src = objURL; bgImg.hidden = false; }
+    scene.hidden = true; $("nightBtn").hidden = false;
+    toast("Drag the creature onto the ground in your shot.", 2600);
+  }
+  ["camInput", "picInput"].forEach(id => $(id).addEventListener("change", e => { useFile(e.target.files && e.target.files[0]); e.target.value = ""; }));
+  $("nightBtn").addEventListener("click", showNight);
+
+  // A live feed works only when the page is opened on its own, outside a frame.
+  let framed = true; try { framed = window.self !== window.top; } catch (e) { framed = true; }
+  if (!framed && navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+    const lb = $("liveBtn"); lb.hidden = false; $("camBtn").hidden = true;
+    lb.addEventListener("click", async () => {
+      try {
+        const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } }, audio: false });
+        clearBackdrop(); stream = s; bgVid.srcObject = s; bgVid.hidden = false; await bgVid.play().catch(() => {});
+        scene.hidden = true; $("nightBtn").hidden = false;
+      } catch (e) { toast("The camera wasn't allowed. Use Camera to take a photo or clip instead."); }
+    });
+  }
+
+  let wakeLock = null;
+  async function wake() { if (wakeLock || !navigator.wakeLock) return; try { wakeLock = await navigator.wakeLock.request("screen"); wakeLock.addEventListener("release", () => { wakeLock = null; }); } catch (e) {} }
+
+  /* ---------- Layout + render loop ---------- */
+  let resizeT;
+  function onResize() { W = innerWidth; H = innerHeight; clearTimeout(resizeT); resizeT = setTimeout(drawScene, 120); }
+  addEventListener("resize", onResize);
+
+  let last = performance.now(), slowFrames = 0, frames = 0, lastSize = 0, running = true;
+  function frame(now) {
+    if (!running) return;
+    const dt = Math.min(.05, (now - last) / 1000); last = now;
+    frames++;
+    if (dt > .03) slowFrames++;
+    if (frames === 90) { if (slowFrames > 45 && res > 340) setRes(Math.round(res * .78)); frames = 0; slowFrames = 0; }
+
+    const speed = reduce ? .35 : 1;
+    st.t += dt * speed * (1 + st.boost);
+    st.boost *= Math.pow(.12, dt);
+    st.seed += (st.seedTarget - st.seed) * Math.min(1, dt * 2.4);
+    level = soundOn ? readLevel() : 0;
+    const target = soundOn ? level : (reduce ? .3 : .3 + .25 * Math.sin(st.t * 1.05));
+    st.pulse += (target - st.pulse) * Math.min(1, dt * (soundOn ? 14 : 4));
+
+    gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.uniform1f(U.uT, st.t); gl.uniform1f(U.uSeed, st.seed); gl.uniform1f(U.uPulse, st.pulse);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    sctx.clearRect(0, 0, shade.width, shade.height);
+    sctx.drawImage(ink, 0, 0, shade.width, shade.height);
+
+    const size = Math.min(W * .94, H * .54) * st.scale;
+    if (size !== lastSize) { ink.style.width = ink.style.height = shade.style.width = shade.style.height = size + "px"; lastSize = size; }
+    const bob = reduce ? 0 : Math.sin(st.t * .75) * size * .022;
+    const swell = 1 + st.pulse * .035;
+    const x = st.cx * W - size / 2, y = st.cy * H - size / 2;
+    ink.style.transform = `translate3d(${x}px,${y - bob}px,0) scale(${swell})`;
+    const lean = reduce ? -6 : -6 + Math.sin(st.t * .31) * 3;
+    shade.style.transform = `translate3d(${x + size * .05}px,${y + size * .66}px,0) scale(${1.5 + bob / size * 2},${.4}) skewX(${lean}deg)`;
+    requestAnimationFrame(frame);
+  }
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) { running = false; }
+    else if (!running) { running = true; last = performance.now(); requestAnimationFrame(frame); }
+  });
+
+  drawScene();
+  try {
+    if (!initGL()) throw new Error("no webgl");
+    requestAnimationFrame(frame);
+  } catch (e) {
+    toast("This browser can't draw WebGL, so the creature can't appear here.", 8000);
+  }
+})();
+</script>
+</body>
+</html>
