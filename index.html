@@ -135,7 +135,7 @@ h1{margin:0;font-family:var(--display);font-style:italic;font-weight:500;font-si
   const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
 
   let W = innerWidth, H = innerHeight;
-  const st = { cx: .5, cy: .47, scale: 1, seed: Math.random() * 20, seedTarget: 0, t: 0, pulse: .3, boost: 0 };
+  const st = { cx: .5, cy: .47, scale: 1, seed: Math.random() * 20, seedTarget: 0, t: 0, rot: 0, pulse: .3, boost: 0 };
   st.seedTarget = st.seed;
 
   let toastTimer;
@@ -334,24 +334,45 @@ varying vec2 v;
 uniform sampler2D uSrc,uField;
 uniform vec2 uRes;
 uniform vec4 uCover;
-uniform float uSeg,uRot,uZoom,uT,uTex,uBlur;
+uniform float uSeg,uRot,uZoom,uT,uTex,uBlur,uMorph;
 uniform vec2 uKC;
 uniform vec3 uInk;
 uniform vec4 uSh;
 uniform vec2 uShS;
 vec2 mrep(vec2 x){vec2 m=mod(x,2.);return 1.-abs(1.-m);}
+vec2 fold(vec2 p,float n,float rot){
+  float a=atan(p.y,p.x)+rot;
+  float seg=6.2831853/n;
+  a=mod(a,seg);a=abs(a-seg*.5);
+  return vec2(cos(a),sin(a))*length(p);
+}
 vec2 kal(vec2 uv){
   if(uSeg<.5)return uv;
   float asp=uRes.x/uRes.y;
   vec2 p=(uv-.5)*vec2(asp,1.);
-  float r=length(p);
-  float a=atan(p.y,p.x)+uRot;
-  float seg=6.2831853/uSeg;
-  a=mod(a,seg);a=abs(a-seg*.5);
-  vec2 q=vec2(cos(a),sin(a))*r*uZoom;
-  return mrep(uKC+vec2(q.x/asp,q.y)+vec2(sin(uT*.07),cos(uT*.05))*.06);
+  float t=uT,m=uMorph,r=length(p);
+  p*=1.+.12*m*sin(r*13.-t*2.3);                                  // rings breathing outward
+  float a=atan(p.y,p.x)+(sin(t*.21)*.9+.35)*m*2.4*r;             // spiral that winds and unwinds
+  p=vec2(cos(a),sin(a))*length(p);
+  vec2 q=fold(p,uSeg,uRot);
+  q+=.05*m*vec2(sin(q.y*9.+t*1.5),cos(q.x*8.-t*1.25));          // liquid flow inside each wedge
+  float off=.2+.07*sin(t*.29);
+  q=fold(q-vec2(off,0.),max(3.,floor(uSeg*.5)),-uRot*1.6)+vec2(off,0.);   // a mandala inside the mandala
+  q*=uZoom;
+  vec2 c=uKC+vec2(sin(t*.11),cos(t*.083))*.1*m;
+  return mrep(c+vec2(q.x/asp,q.y));
 }
-vec3 bg(vec2 uv){return texture2D(uSrc,clamp(kal(uv),0.,1.)*uCover.xy+uCover.zw).rgb;}
+vec3 tex(vec2 k){return texture2D(uSrc,clamp(k,0.,1.)*uCover.xy+uCover.zw).rgb;}
+vec3 bg(vec2 uv){
+  vec2 k=clamp(kal(uv),0.,1.);
+  if(uSeg<.5)return tex(k);
+  vec2 d=(k-.5)*.014*uMorph+vec2(.0025*uMorph,0.);              // chromatic split
+  vec3 c=vec3(tex(k+d).r,tex(k).g,tex(k-d).b);
+  float l=dot(c,vec3(.299,.587,.114));
+  c=mix(vec3(l),c,1.+.6*uMorph);                                 // richer colour
+  c=pow(max(c,0.),vec3(1./(1.+.18*uMorph)));                     // lift the shadows so dark feeds still read
+  return clamp(c*(1.+.06*uMorph),0.,1.);
+}
 float dec(vec4 f){return f.r+f.g/255.;}
 void main(){
   vec2 frag=gl_FragCoord.xy;
@@ -442,7 +463,7 @@ void main(){
     quad = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, quad);
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
     ["uT", "uSeed", "uPulse"].forEach(n => UF[n] = gl.getUniformLocation(pField, n));
-    ["uSrc", "uField", "uRes", "uCover", "uSeg", "uRot", "uZoom", "uT", "uTex", "uBlur", "uInk", "uSh", "uShS", "uKC"].forEach(n => UC[n] = gl.getUniformLocation(pComp, n));
+    ["uSrc", "uField", "uRes", "uCover", "uSeg", "uRot", "uZoom", "uT", "uTex", "uBlur", "uInk", "uSh", "uShS", "uKC", "uMorph"].forEach(n => UC[n] = gl.getUniformLocation(pComp, n));
     texSrc = makeTex(); texField = makeTex(); fb = gl.createFramebuffer();
     setFieldRes(fieldRes); sizeCanvas();
     return true;
@@ -461,7 +482,9 @@ void main(){
     const kx = glc.width / W, ky = glc.height / H, h = L.size / 2;
     gl.uniform2f(UC.uRes, glc.width, glc.height);
     gl.uniform4f(UC.uCover, cov[0], cov[1], cov[2], cov[3]);
-    gl.uniform1f(UC.uSeg, kSeg); gl.uniform1f(UC.uRot, reduce ? 0 : st.t * .035); gl.uniform1f(UC.uZoom, .95 - st.pulse * .04); gl.uniform1f(UC.uT, st.t);
+    gl.uniform1f(UC.uSeg, kSeg); gl.uniform1f(UC.uRot, st.rot); gl.uniform1f(UC.uT, st.t);
+    gl.uniform1f(UC.uZoom, reduce ? .95 : .92 - st.pulse * .14 + .06 * Math.sin(st.t * .37));
+    gl.uniform1f(UC.uMorph, reduce ? .25 : 1 + st.pulse * .7 + Math.min(st.boost, 2.6) * .5);
     if (srcKind === "scene") gl.uniform2f(UC.uKC, .5, .3); else gl.uniform2f(UC.uKC, .5, .5);
     gl.uniform1f(UC.uTex, 1 / fieldRes); gl.uniform1f(UC.uBlur, 2.6 / L.size);
     gl.uniform3f(UC.uInk, (L.x + h) * kx, (H - (L.y - L.bob + h)) * ky, h * L.swell * kx);
@@ -583,7 +606,7 @@ void main(){
   stage.addEventListener("pointercancel", endPtr);
   stage.addEventListener("wheel", e => { e.preventDefault(); st.scale = clamp(st.scale * Math.exp(-e.deltaY * .0015), .4, 2.3); }, { passive: false });
 
-  const KSEQ = [8, 12, 6, 0];
+  const KSEQ = [8, 12, 16, 6, 0];
   let kIdx = 0;
   $("kalBtn").addEventListener("click", () => {
     kIdx = (kIdx + 1) % KSEQ.length; kSeg = KSEQ[kIdx];
@@ -663,6 +686,7 @@ void main(){
     const speed = reduce ? .35 : 1;
     st.t += dt * speed * (1 + st.boost);
     st.boost *= Math.pow(.12, dt);
+    st.rot += dt * (reduce ? .01 : .09 + st.boost * .35 + st.pulse * .06);
     st.seed += (st.seedTarget - st.seed) * Math.min(1, dt * 2.4);
     level = soundOn ? readLevel() : 0;
     const target = soundOn ? level : (reduce ? .3 : .3 + .25 * Math.sin(st.t * 1.05));
