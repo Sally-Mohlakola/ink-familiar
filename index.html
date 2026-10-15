@@ -6,7 +6,7 @@
 <style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0;font:14px system-ui,sans-serif}img{max-width:100%}[hidden]{display:none!important}</style>
 <title>Ink Familiar</title>
 <meta name="claude:viewport-fit-sides" content="cover">
-<meta name="description" content="A mirror-symmetric ink creature that morphs over a night scene or your own photo.">
+<meta name="description" content="A liquid-silver creature that morphs and casts a shadow over a kaleidoscope of your camera, a photo, or a night scene.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:ital,opsz,wght@1,6..96,500&family=Martian+Mono:wght@400;500&display=swap">
@@ -30,9 +30,8 @@ html,body{height:100%}
 body{background:var(--bg);color:var(--fg);overflow:hidden;overscroll-behavior:none;font-family:var(--mono);-webkit-tap-highlight-color:transparent}
 #stage{position:fixed;inset:0;overflow:hidden;background:var(--bg);touch-action:none;user-select:none;-webkit-user-select:none;cursor:grab}
 #stage.dragging{cursor:grabbing}
-#scene,#bgImg,#bgVid{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block}
-#shade{position:absolute;left:0;top:0;transform-origin:50% 50%;opacity:.82;filter:blur(1.6px);mix-blend-mode:multiply;pointer-events:none;will-change:transform}
-#ink{position:absolute;left:0;top:0;pointer-events:none;will-change:transform}
+#gl{position:absolute;inset:0;width:100%;height:100%;display:block}
+.src-vid{position:fixed;left:0;top:0;width:2px;height:2px;opacity:.01;pointer-events:none}
 .ui{position:fixed;left:0;right:0;pointer-events:none;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
 .top{top:0;padding-block:calc(env(safe-area-inset-top,0px) + 14px) 0;display:flex;justify-content:space-between;align-items:baseline;gap:12px}
 h1{margin:0;font-family:var(--display);font-style:italic;font-weight:500;font-size:1.4rem;line-height:1.1;letter-spacing:.005em;text-shadow:0 1px 14px rgba(0,0,0,.7);text-wrap:balance}
@@ -69,12 +68,11 @@ h1{margin:0;font-family:var(--display);font-style:italic;font-weight:500;font-si
 </head>
 <body>
 <div id="stage" aria-label="Ink creature stage. Drag to move, tap to mutate, pinch to resize.">
-  <canvas id="scene" aria-hidden="true"></canvas>
-  <img id="bgImg" alt="Your backdrop" hidden>
-  <video id="bgVid" muted loop playsinline autoplay hidden></video>
-  <canvas id="shade" aria-hidden="true"></canvas>
-  <canvas id="ink" aria-hidden="true"></canvas>
+  <canvas id="gl" aria-hidden="true"></canvas>
 </div>
+<canvas id="scene" hidden aria-hidden="true"></canvas>
+<img id="bgImg" alt="" hidden>
+<video id="bgVid" class="src-vid" muted loop playsinline autoplay aria-hidden="true"></video>
 
 <header class="ui top">
   <h1>Ink Familiar</h1>
@@ -97,8 +95,8 @@ h1{margin:0;font-family:var(--display);font-style:italic;font-weight:500;font-si
     <button class="btn" id="liveBtn" type="button" hidden>
       <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><circle cx="8" cy="8" r="2"/><circle cx="8" cy="8" r="5.5"/></svg>Live
     </button>
-    <button class="btn" id="mutBtn" type="button">
-      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><path d="M8 2v12M3 5c2 0 3 1.5 5 3M13 5c-2 0-3 1.5-5 3M3.5 12c1.5-1 3-1.6 4.5-1.6S11 11 12.5 12"/></svg>Mutate
+    <button class="btn" id="kalBtn" type="button" aria-pressed="true">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><path d="M8 1.5v13M2.4 4.75l11.2 6.5M2.4 11.25l11.2-6.5"/><circle cx="8" cy="8" r="2.2"/></svg><span>Kaleido ×8</span>
     </button>
     <button class="btn" id="sndBtn" type="button" aria-pressed="false">
       <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><path d="M2.5 6h2.5L8.5 3v10L5 10H2.5z"/><path d="M11 5.5c1 .8 1.5 1.6 1.5 2.5s-.5 1.7-1.5 2.5"/></svg><span>Sound</span>
@@ -132,7 +130,7 @@ h1{margin:0;font-family:var(--display);font-style:italic;font-weight:500;font-si
 (() => {
   "use strict";
   const $ = id => document.getElementById(id);
-  const stage = $("stage"), scene = $("scene"), ink = $("ink"), shade = $("shade");
+  const stage = $("stage"), scene = $("scene");
   const bgImg = $("bgImg"), bgVid = $("bgVid"), hint = $("hint"), toastEl = $("toast");
   const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
 
@@ -264,21 +262,15 @@ h1{margin:0;font-family:var(--display);font-style:italic;font-weight:500;font-si
     g.addColorStop(0, "rgba(0,0,0,0)"); g.addColorStop(1, "rgba(0,0,0,.6)");
     c.fillStyle = g; c.fillRect(0, 0, w, h);
     for (let i = 0; i < 9000; i++) { c.fillStyle = `rgba(255,255,255,${r() * .035})`; c.fillRect(r() * w, r() * h, 1, 1); }
+    if (srcKind === "scene") uploadSrc(scene, w, h);
   }
 
-  /* ---------- The ink creature (WebGL) ---------- */
-  const gl = ink.getContext("webgl", { premultipliedAlpha: true, alpha: true, antialias: false, preserveDrawingBuffer: true });
-  const sctx = shade.getContext("2d");
-  let prog, U = {};
+  /* ---------- Rendering (WebGL): kaleidoscope backdrop, liquid-silver creature, cast shadow ---------- */
+  const glc = $("gl");
+  const gl = glc.getContext("webgl", { alpha: false, antialias: false, preserveDrawingBuffer: true, premultipliedAlpha: false });
+  const PREC = "#ifdef GL_FRAGMENT_PRECISION_HIGH\nprecision highp float;\n#else\nprecision mediump float;\n#endif\n";
   const VS = "attribute vec2 a;varying vec2 v;void main(){v=a*.5+.5;gl_Position=vec4(a,0.,1.);}";
-  const FS = `
-#ifdef GL_FRAGMENT_PRECISION_HIGH
-precision highp float;
-#else
-precision mediump float;
-#endif
-varying vec2 v;
-uniform float uT, uSeed, uPulse;
+  const NOISE = `
 vec3 mod289(vec3 x){return x-floor(x*(1./289.))*289.;}
 vec4 mod289(vec4 x){return x-floor(x*(1./289.))*289.;}
 vec4 permute(vec4 x){return mod289(((x*34.)+1.)*x);}
@@ -303,6 +295,11 @@ float snoise(vec3 v){
 }
 float fbm(vec3 p){float a=.5,s=0.;for(int i=0;i<4;i++){s+=a*snoise(p);p=p*2.07+vec3(1.3,7.1,3.7);a*=.5;}return s;}
 float fbm2(vec3 p){return .6*snoise(p)+.3*snoise(p*2.1+vec3(4.1,2.3,0.));}
+`;
+  // Pass 1: the creature as a height field (packed into R+G) with coverage in B.
+  const FS_FIELD = PREC + NOISE + `
+varying vec2 v;
+uniform float uT,uSeed,uPulse;
 void main(){
   vec2 p=v*2.-1.;
   vec2 m=vec2(abs(p.x),p.y);                 // the fold: left half mirrors the right
@@ -312,40 +309,167 @@ void main(){
   vec2 q=m+w*.42;
   float r=length(q*vec2(1.08,.86));
   float body=fbm(vec3(q*3.1,z*1.15+3.))*1.45+.3+uPulse*.14-r*1.3;
-  body+=smoothstep(.12,0.,m.x+w.x*.06)*.16*smoothstep(.9,.2,abs(p.y));    // spine
-  float holes=fbm2(vec3(q*6.5,z*1.4+60.));
-  body-=smoothstep(.15,.45,holes)*.35;
+  body+=smoothstep(.12,0.,m.x+w.x*.06)*.16*smoothstep(.9,.2,abs(p.y));
+  body-=smoothstep(.15,.45,fbm2(vec3(q*6.5,z*1.4+60.)))*.35;
   float n1=snoise(vec3(q*2.2,z*.8+40.));
   float n2=snoise(vec3(q*4.8+3.,z+80.));
-  vec2 pol=vec2(atan(q.y,q.x+.02)*1.7,r*1.15);                            // radiating legs
+  vec2 pol=vec2(atan(q.y,q.x+.02)*1.7,r*1.15);
   float n3=snoise(vec3(pol,z*.7+120.));
   float rid1=pow(1.-abs(n1),20.)*smoothstep(1.15,.3,r);
   float rid2=pow(1.-abs(n2),30.)*smoothstep(.9,.2,r);
   float leg=pow(1.-abs(n3),16.)*smoothstep(1.1,.4,r)*smoothstep(.12,.32,r);
   float lines=max(max(rid1,rid2*.9),leg);
-  float a=smoothstep(0.,.025,body);
-  a=max(a,smoothstep(.3,.68,lines));
+  float a=max(smoothstep(0.,.025,body),smoothstep(.3,.68,lines));
   a*=smoothstep(1.,.84,max(abs(p.x),abs(p.y)));
-  float sheen=smoothstep(.06,.32,body)*(.5+.5*snoise(vec3(q*6.,z*1.8)));
-  vec3 col=vec3(.006,.006,.008)+sheen*vec3(.014,.015,.017);
-  gl_FragColor=vec4(col*a,a*.97);
+  float hb=sqrt(clamp(body/.32,0.,1.));                 // rounded, poured-metal edges
+  float hl=sqrt(smoothstep(.2,1.,lines))*.62;            // tubes for the thin limbs
+  float h=max(hb,hl);
+  h=clamp(h*.86+.12*snoise(vec3(q*6.5,z*2.6+200.))*h,0.,1.)*a;   // slow liquid ripple
+  float hi=floor(h*255.)/255.;
+  gl_FragColor=vec4(hi,(h-hi)*255.,a,1.);
 }`;
-  let res = 560;
+  // Pass 2: backdrop (optionally kaleidoscoped), shadow, then the silver surface reflecting the backdrop.
+  const FS_COMP = PREC + `
+varying vec2 v;
+uniform sampler2D uSrc,uField;
+uniform vec2 uRes;
+uniform vec4 uCover;
+uniform float uSeg,uRot,uZoom,uT,uTex,uBlur;
+uniform vec2 uKC;
+uniform vec3 uInk;
+uniform vec4 uSh;
+uniform vec2 uShS;
+vec2 mrep(vec2 x){vec2 m=mod(x,2.);return 1.-abs(1.-m);}
+vec2 kal(vec2 uv){
+  if(uSeg<.5)return uv;
+  float asp=uRes.x/uRes.y;
+  vec2 p=(uv-.5)*vec2(asp,1.);
+  float r=length(p);
+  float a=atan(p.y,p.x)+uRot;
+  float seg=6.2831853/uSeg;
+  a=mod(a,seg);a=abs(a-seg*.5);
+  vec2 q=vec2(cos(a),sin(a))*r*uZoom;
+  return mrep(uKC+vec2(q.x/asp,q.y)+vec2(sin(uT*.07),cos(uT*.05))*.06);
+}
+vec3 bg(vec2 uv){return texture2D(uSrc,clamp(kal(uv),0.,1.)*uCover.xy+uCover.zw).rgb;}
+float dec(vec4 f){return f.r+f.g/255.;}
+void main(){
+  vec2 frag=gl_FragCoord.xy;
+  vec2 suv=frag/uRes;
+  vec3 col=bg(suv);
+  // cast shadow: the same field, flattened onto the ground and softened
+  vec2 d=(frag-uSh.xy)/uShS;
+  d.x+=uSh.w*d.y;
+  vec2 su=d/uSh.z*.5+.5;
+  if(su.x>0.&&su.x<1.&&su.y>0.&&su.y<1.){
+    float s=texture2D(uField,su).b*.28
+      +texture2D(uField,su+vec2(uBlur,0.)).b*.18+texture2D(uField,su-vec2(uBlur,0.)).b*.18
+      +texture2D(uField,su+vec2(0.,uBlur)).b*.18+texture2D(uField,su-vec2(0.,uBlur)).b*.18;
+    col*=1.-.8*s;
+  }
+  // the creature
+  vec2 cu=(frag-uInk.xy)/uInk.z*.5+.5;
+  if(cu.x>0.&&cu.x<1.&&cu.y>0.&&cu.y<1.){
+    vec4 f=texture2D(uField,cu);
+    float a=f.b;
+    if(a>.002){
+      float e=uTex*1.5;
+      float hx=dec(texture2D(uField,cu+vec2(e,0.)))-dec(texture2D(uField,cu-vec2(e,0.)));
+      float hy=dec(texture2D(uField,cu+vec2(0.,e)))-dec(texture2D(uField,cu-vec2(0.,e)));
+      vec3 n=normalize(vec3(-vec2(hx,hy)/(2.*e)*.05,1.));
+      float h=dec(f);
+      vec3 r=reflect(vec3(0.,0.,-1.),n);
+      float up=r.y;
+      vec3 env=mix(vec3(.035,.04,.045),vec3(.93,.95,.99),smoothstep(-.4,.6,up));
+      env+=smoothstep(.07,0.,abs(up-.16))*.6;                               // horizon glint
+      env+=smoothstep(.06,0.,abs(r.x+.42))*.4*smoothstep(-.2,.7,up);         // window strip
+      env*=.86+.14*sin(r.x*7.+uT*.5);
+      vec3 sc=bg(suv+n.xy*.2);                                               // the live view, bent by the surface
+      vec3 silver=mix(env,sc*1.2+.05,.45)*vec3(.9,.92,.96);
+      silver+=pow(1.-max(n.z,0.),2.5)*.35;
+      vec3 L=normalize(vec3(-.45,.65,.62));
+      silver+=pow(max(dot(r,L),0.),90.)*1.4;
+      silver*=.6+.4*smoothstep(0.,.2,h);
+      col=mix(col,clamp(silver,0.,1.),a);
+    }
+  }
+  gl_FragColor=vec4(col,1.);
+}`;
+  let pField, pComp, UF = {}, UC = {}, quad, texSrc, texField, fb, fieldRes = 512;
+  let qMax = Math.min(devicePixelRatio || 1, 2);
+  let srcKind = "scene", cov = [1, 1, 0, 0];
+  let kSeg = 8;
+  function compile(fsSrc) {
+    const sh = (type, src) => { const x = gl.createShader(type); gl.shaderSource(x, src); gl.compileShader(x); if (!gl.getShaderParameter(x, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(x)); return x; };
+    const p = gl.createProgram();
+    gl.attachShader(p, sh(gl.VERTEX_SHADER, VS)); gl.attachShader(p, sh(gl.FRAGMENT_SHADER, fsSrc));
+    gl.linkProgram(p); if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+    return p;
+  }
+  function makeTex() {
+    const t = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, t);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([5, 6, 6, 255]));
+    return t;
+  }
+  function setFieldRes(n) {
+    fieldRes = n;
+    gl.bindTexture(gl.TEXTURE_2D, texField);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, n, n, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texField, 0);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  }
+  function sizeCanvas() { glc.width = Math.round(W * qMax / 2) * 2; glc.height = Math.round(H * qMax / 2) * 2; }
+  function coverFor(sw, sh) {
+    if (!sw || !sh) return [1, 1, 0, 0];
+    const sa = sw / sh, ca = W / H;
+    if (sa > ca) { const x = ca / sa; return [x, 1, (1 - x) / 2, 0]; }
+    const y = sa / ca; return [1, y, 0, (1 - y) / 2];
+  }
+  function uploadSrc(el, sw, sh) {
+    if (!gl || !texSrc) return;
+    gl.bindTexture(gl.TEXTURE_2D, texSrc);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+    try { gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, el); } catch (e) {}
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+    cov = coverFor(sw, sh);
+  }
   function initGL() {
     if (!gl) return false;
-    const sh = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s)); return s; };
-    prog = gl.createProgram();
-    gl.attachShader(prog, sh(gl.VERTEX_SHADER, VS)); gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, FS));
-    gl.linkProgram(prog); if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
-    gl.useProgram(prog);
-    const buf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    pField = compile(FS_FIELD); pComp = compile(FS_COMP);
+    quad = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, quad);
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
-    const loc = gl.getAttribLocation(prog, "a"); gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
-    ["uT", "uSeed", "uPulse"].forEach(n => U[n] = gl.getUniformLocation(prog, n));
-    setRes(res);
+    ["uT", "uSeed", "uPulse"].forEach(n => UF[n] = gl.getUniformLocation(pField, n));
+    ["uSrc", "uField", "uRes", "uCover", "uSeg", "uRot", "uZoom", "uT", "uTex", "uBlur", "uInk", "uSh", "uShS", "uKC"].forEach(n => UC[n] = gl.getUniformLocation(pComp, n));
+    texSrc = makeTex(); texField = makeTex(); fb = gl.createFramebuffer();
+    setFieldRes(fieldRes); sizeCanvas();
     return true;
   }
-  function setRes(n) { res = n; ink.width = ink.height = n; shade.width = shade.height = Math.round(n * .5); gl.viewport(0, 0, n, n); }
+  function bindQuad(p) { gl.bindBuffer(gl.ARRAY_BUFFER, quad); const loc = gl.getAttribLocation(p, "a"); gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0); }
+  function render(L) {
+    if (srcKind === "video" && bgVid.readyState >= 2 && bgVid.videoWidth) uploadSrc(bgVid, bgVid.videoWidth, bgVid.videoHeight);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fb); gl.viewport(0, 0, fieldRes, fieldRes);
+    gl.useProgram(pField); bindQuad(pField);
+    gl.uniform1f(UF.uT, st.t); gl.uniform1f(UF.uSeed, st.seed); gl.uniform1f(UF.uPulse, st.pulse);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.viewport(0, 0, glc.width, glc.height);
+    gl.useProgram(pComp); bindQuad(pComp);
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, texSrc); gl.uniform1i(UC.uSrc, 0);
+    gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, texField); gl.uniform1i(UC.uField, 1);
+    const kx = glc.width / W, ky = glc.height / H, h = L.size / 2;
+    gl.uniform2f(UC.uRes, glc.width, glc.height);
+    gl.uniform4f(UC.uCover, cov[0], cov[1], cov[2], cov[3]);
+    gl.uniform1f(UC.uSeg, kSeg); gl.uniform1f(UC.uRot, reduce ? 0 : st.t * .035); gl.uniform1f(UC.uZoom, .95 - st.pulse * .04); gl.uniform1f(UC.uT, st.t);
+    if (srcKind === "scene") gl.uniform2f(UC.uKC, .5, .3); else gl.uniform2f(UC.uKC, .5, .5);
+    gl.uniform1f(UC.uTex, 1 / fieldRes); gl.uniform1f(UC.uBlur, 2.6 / L.size);
+    gl.uniform3f(UC.uInk, (L.x + h) * kx, (H - (L.y - L.bob + h)) * ky, h * L.swell * kx);
+    gl.uniform4f(UC.uSh, (L.sx + h) * kx, (H - (L.sy + h)) * ky, h * kx, Math.tan(L.lean * Math.PI / 180));
+    gl.uniform2f(UC.uShS, L.sa, .4);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    gl.activeTexture(gl.TEXTURE0);
+  }
 
   /* ---------- Sound: a low drone, a sub, ticks and thumps; the creature breathes with it ---------- */
   let ac = null, master, analyser, lvlBuf, nextT = 0, step = 0, schedId = 0, soundOn = false, clickBuf, level = 0, recDest = null;
@@ -459,31 +583,36 @@ void main(){
   stage.addEventListener("pointercancel", endPtr);
   stage.addEventListener("wheel", e => { e.preventDefault(); st.scale = clamp(st.scale * Math.exp(-e.deltaY * .0015), .4, 2.3); }, { passive: false });
 
-  $("mutBtn").addEventListener("click", () => { mutate(); dismissHint(); });
+  const KSEQ = [8, 12, 6, 0];
+  let kIdx = 0;
+  $("kalBtn").addEventListener("click", () => {
+    kIdx = (kIdx + 1) % KSEQ.length; kSeg = KSEQ[kIdx];
+    $("kalBtn").setAttribute("aria-pressed", String(kSeg > 0));
+    $("kalBtn").querySelector("span").textContent = kSeg ? "Kaleido ×" + kSeg : "Kaleido off";
+  });
   $("sndBtn").addEventListener("click", toggleSound);
   ["camBtn", "picBtn"].forEach(id => $(id).addEventListener("keydown", e => {
     if (e.key === "Enter" || e.key === " ") { e.preventDefault(); $(id === "camBtn" ? "camInput" : "picInput").click(); }
   }));
 
-  /* ---------- Backdrops ---------- */
+  /* ---------- Backdrops: night scene, a photo or clip, or the live camera ---------- */
   let objURL = null, stream = null;
   function clearBackdrop() {
     if (objURL) { URL.revokeObjectURL(objURL); objURL = null; }
     if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
     bgVid.pause(); bgVid.srcObject = null; bgVid.removeAttribute("src"); bgVid.load();
-    bgImg.removeAttribute("src");
-    bgImg.hidden = true; bgVid.hidden = true;
+    bgImg.onload = null; bgImg.removeAttribute("src");
   }
-  function showNight() { clearBackdrop(); scene.hidden = false; $("nightBtn").hidden = true; }
+  function showNight() { clearBackdrop(); srcKind = "scene"; uploadSrc(scene, scene.width, scene.height); $("nightBtn").hidden = true; }
   function useFile(file) {
     if (!file) return;
     const isVid = file.type.startsWith("video"), isImg = file.type.startsWith("image");
     if (!isVid && !isImg) { toast("Choose a photo or a video clip."); return; }
     clearBackdrop(); objURL = URL.createObjectURL(file);
-    if (isVid) { bgVid.src = objURL; bgVid.hidden = false; bgVid.play().catch(() => {}); }
-    else { bgImg.src = objURL; bgImg.hidden = false; }
-    scene.hidden = true; $("nightBtn").hidden = false;
-    toast("Drag the creature onto the ground in your shot.", 2600);
+    if (isVid) { srcKind = "video"; bgVid.src = objURL; bgVid.play().catch(() => {}); }
+    else { srcKind = "img"; bgImg.onload = () => { if (srcKind === "img") uploadSrc(bgImg, bgImg.naturalWidth, bgImg.naturalHeight); }; bgImg.src = objURL; }
+    $("nightBtn").hidden = false;
+    toast(kSeg ? "Tap Kaleido to change the mirrors, or turn them off." : "Drag the creature onto the ground in your shot.", 2600);
   }
   ["camInput", "picInput"].forEach(id => $(id).addEventListener("change", e => { useFile(e.target.files && e.target.files[0]); e.target.value = ""; }));
   $("nightBtn").addEventListener("click", showNight);
@@ -494,10 +623,11 @@ void main(){
     const lb = $("liveBtn"); lb.hidden = false; $("camBtn").hidden = true;
     lb.addEventListener("click", async () => {
       try {
-        const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } }, audio: false });
-        clearBackdrop(); stream = s; bgVid.srcObject = s; bgVid.hidden = false; await bgVid.play().catch(() => {});
-        scene.hidden = true; $("nightBtn").hidden = false;
-      } catch (e) { toast("The camera wasn't allowed. Use Camera to take a photo or clip instead."); }
+        const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
+        clearBackdrop(); stream = s; bgVid.srcObject = s; srcKind = "video";
+        await bgVid.play().catch(() => {});
+        $("nightBtn").hidden = false;
+      } catch (e) { toast("The camera wasn't allowed. Allow camera access for this site in your browser settings, then tap Live again."); }
     });
   }
 
@@ -506,16 +636,29 @@ void main(){
 
   /* ---------- Layout + render loop ---------- */
   let resizeT;
-  function onResize() { W = innerWidth; H = innerHeight; clearTimeout(resizeT); resizeT = setTimeout(drawScene, 120); }
+  function onResize() {
+    W = innerWidth; H = innerHeight; clearTimeout(resizeT);
+    resizeT = setTimeout(() => {
+      if (!gl) return;
+      sizeCanvas(); drawScene();
+      if (srcKind === "img" && bgImg.naturalWidth) cov = coverFor(bgImg.naturalWidth, bgImg.naturalHeight);
+    }, 120);
+  }
   addEventListener("resize", onResize);
 
-  let last = performance.now(), slowFrames = 0, frames = 0, lastSize = 0, running = true;
+  let last = performance.now(), slowFrames = 0, frames = 0, running = true;
   function frame(now) {
     if (!running) return;
     const dt = Math.min(.05, (now - last) / 1000); last = now;
     frames++;
     if (dt > .03) slowFrames++;
-    if (frames === 90) { if (slowFrames > 45 && res > 340) setRes(Math.round(res * .78)); frames = 0; slowFrames = 0; }
+    if (frames === 90) {
+      if (slowFrames > 45) {
+        if (fieldRes > 340) setFieldRes(Math.round(fieldRes * .8 / 2) * 2);
+        else if (qMax > 1) { qMax = Math.max(1, qMax - .5); sizeCanvas(); }
+      }
+      frames = 0; slowFrames = 0;
+    }
 
     const speed = reduce ? .35 : 1;
     st.t += dt * speed * (1 + st.boost);
@@ -525,21 +668,13 @@ void main(){
     const target = soundOn ? level : (reduce ? .3 : .3 + .25 * Math.sin(st.t * 1.05));
     st.pulse += (target - st.pulse) * Math.min(1, dt * (soundOn ? 14 : 4));
 
-    gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT);
-    gl.uniform1f(U.uT, st.t); gl.uniform1f(U.uSeed, st.seed); gl.uniform1f(U.uPulse, st.pulse);
-    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-    sctx.clearRect(0, 0, shade.width, shade.height);
-    sctx.drawImage(ink, 0, 0, shade.width, shade.height);
-
     const size = Math.min(W * .94, H * .54) * st.scale;
-    if (size !== lastSize) { ink.style.width = ink.style.height = shade.style.width = shade.style.height = size + "px"; lastSize = size; }
     const bob = reduce ? 0 : Math.sin(st.t * .75) * size * .022;
     const swell = 1 + st.pulse * .035;
     const x = st.cx * W - size / 2, y = st.cy * H - size / 2;
-    ink.style.transform = `translate3d(${x}px,${y - bob}px,0) scale(${swell})`;
     const lean = reduce ? -6 : -6 + Math.sin(st.t * .31) * 3;
     L = { size, x, y, bob, swell, lean, sx: x + size * .05, sy: y + size * .66, sa: 1.5 + bob / size * 2 };
-    shade.style.transform = `translate3d(${L.sx}px,${L.sy}px,0) scale(${L.sa},.4) skewX(${lean}deg)`;
+    render(L);
     if (rec) composite();
     requestAnimationFrame(frame);
   }
@@ -565,28 +700,8 @@ void main(){
     for (const m of list) { try { if (MediaRecorder.isTypeSupported(m)) return m; } catch (e) {} }
     return "";
   }
-  function drawCover(src, sw, sh) {
-    if (!sw || !sh) return;
-    const s = Math.max(rc.width / sw, rc.height / sh), dw = sw * s, dh = sh * s;
-    rctx.drawImage(src, (rc.width - dw) / 2, (rc.height - dh) / 2, dw, dh);
-  }
   function composite() {
-    if (!L) return;
-    const c = rctx, k = rc.width / W, h = L.size / 2;
-    c.setTransform(1, 0, 0, 1, 0, 0); c.globalAlpha = 1; c.globalCompositeOperation = "source-over"; if ("filter" in c) c.filter = "none";
-    c.fillStyle = "#050606"; c.fillRect(0, 0, rc.width, rc.height);
-    if (!scene.hidden) c.drawImage(scene, 0, 0, rc.width, rc.height);
-    else if (!bgImg.hidden) drawCover(bgImg, bgImg.naturalWidth, bgImg.naturalHeight);
-    else if (!bgVid.hidden) drawCover(bgVid, bgVid.videoWidth, bgVid.videoHeight);
-    c.save(); c.setTransform(k, 0, 0, k, 0, 0);
-    c.globalAlpha = .82; c.globalCompositeOperation = "multiply"; if ("filter" in c) c.filter = "blur(1.6px)";
-    c.translate(L.sx + h, L.sy + h); c.scale(L.sa, .4); c.transform(1, 0, Math.tan(L.lean * Math.PI / 180), 1, 0, 0);
-    c.drawImage(shade, -h, -h, L.size, L.size);
-    c.restore();
-    c.save(); c.setTransform(k, 0, 0, k, 0, 0);
-    c.translate(L.x + h, L.y - L.bob + h); c.scale(L.swell, L.swell);
-    c.drawImage(ink, -h, -h, L.size, L.size);
-    c.restore();
+    rctx.drawImage(glc, 0, 0, rc.width, rc.height);
   }
   const fmt = s => Math.floor(s / 60) + ":" + String(Math.floor(s % 60)).padStart(2, "0");
   function tickTime() {
@@ -685,11 +800,12 @@ void main(){
     else if (!running) { running = true; last = performance.now(); requestAnimationFrame(frame); }
   });
 
-  drawScene();
   try {
     if (!initGL()) throw new Error("no webgl");
+    drawScene();
     requestAnimationFrame(frame);
   } catch (e) {
+    console.error(e);
     toast("This browser can't draw WebGL, so the creature can't appear here.", 8000);
   }
 })();
